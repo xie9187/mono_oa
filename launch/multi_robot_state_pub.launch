@@ -1,0 +1,50 @@
+<launch>
+  <!-- No namespace here as we will share this description.
+       Access with slash at the beginning -->
+
+  <param name="robot_description"
+    command="$(find xacro)/xacro.py $(find mono_oa)/robots/kobuki_hexagons_hokuyo.xml" />
+
+  <group ns="robot1">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo1.xml -x 0 -y 0 -z 0 -model robot1"
+     respawn="false" output="screen" />
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" output="screen"/> 
+  </group>
+
+
+  <group ns="robot2">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo2.xml -x 0 -y 1 -z 0 -model robot2"
+     respawn="false" output="screen" />
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" output="screen"/> 
+  </group>
+
+
+  <group ns="robot3">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo3.xml -x 0 -y 2 -z 0 -model robot3"
+     respawn="false" output="screen" />
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" output="screen"/> 
+  </group>
+
+  <group ns="robot4">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo4.xml -x 0 -y 3 -z 0 -model robot4"
+     respawn="false" output="screen" />
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" output="screen"/> 
+  </group>
+
+  <group ns="robot5">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo5.xml -x 0 -y 4 -z 0 -model robot5"
+     respawn="false" output="screen" />
+
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" output="screen"/> 
+  </group>
+
+</launch>     

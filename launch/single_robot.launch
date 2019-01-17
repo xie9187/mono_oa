@@ -1,0 +1,14 @@
+<launch>
+  <!-- No namespace here as we will share this description.
+       Access with slash at the beginning -->
+
+  <param name="robot_description"
+    command="$(find xacro)/xacro.py $(find mono_oa)/robots/kobuki_hexagons_hokuyo.xml" />
+
+  <group ns="robot1">
+    <node name="spawn_minibot_model" pkg="gazebo_ros" type="spawn_model"
+     args="-urdf -file $(find mono_oa)/robots/kobuki_hexagons_hokuyo1.xml -x 0 -y 0 -z 0 -model robot1"
+     respawn="false" output="screen" />
+  </group>
+
+</launch>     
