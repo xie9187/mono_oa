@@ -1,6 +1,6 @@
 import numpy as np
 
-m = 100.4
+m = 50.4
 h = 0.09
 r = 0.175
 

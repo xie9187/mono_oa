@@ -1,10 +1,10 @@
 <launch>
   <!-- start world -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
-    <arg name="world_name" value="$(find gazebo_ros)/world/empty.world"/>
+    <arg name="world_name" value="$(find mono_oa)/world/random_indoor.world"/>
     <arg name="paused" value="false"/>
     <arg name="use_sim_time" value="true"/>
-    <arg name="gui" value="true"/>
+    <arg name="gui" value="false"/>
     <arg name="headless" value="true"/>
     <arg name="recording" value="false"/>
     <arg name="debug" value="false"/>
