@@ -24,6 +24,7 @@ PWD = os.getcwd()
 class GazeboEnv():
 	def __init__(self):
 		# initiliaze
+		# self.LaunchGazebo()
 		rospy.init_node('GazeboWorld', anonymous=False, disable_signals=True)
 
 		#------------Params--------------------
@@ -56,6 +57,10 @@ class GazeboEnv():
 		self.model_state_sub = rospy.Subscriber('gazebo/model_states', ModelStates, self.ModelStateCallBack)
 		self.sim_clock = rospy.Subscriber('clock', Clock, self.SimClockCallBack)
 
+		while self.model_names is None and not rospy.is_shutdown():
+			pass
+		print "Env intialised"
+
 
 	def ModelStateCallBack(self, data):
 		self.model_names = data.name
@@ -72,7 +77,7 @@ class GazeboEnv():
 
 	def GetObjectName(self):
 		name_list = []
-		back_list = ['Floor', 'env', 'robot', 'ground']
+		back_list = ['Floor', 'env', 'robot', 'ground', 'door']
 		for name in self.model_names:
 			append_flag = True
 			for black_name in back_list:
@@ -164,7 +169,7 @@ class GazeboEnv():
 				launch_file.writelines(file)
 
 class GazeboRobot():
-	def __init__(self, robot_name):
+	def __init__(self, robot_name, max_steps):
 		#------------Params--------------------
 		self.depth_image_size = [160, 128]
 		self.rgb_image_size = [304, 228]
@@ -172,7 +177,7 @@ class GazeboRobot():
 		self.robot_name = robot_name
 		self.self_speed = [0.0, 0.0]
 		self.start_time = time.time()
-		self.max_steps = 200
+		self.max_steps = max_steps
 		self.sim_time = Clock().clock
 		self.control_freq = 5.
 		self.pose = None
@@ -348,14 +353,23 @@ class GazeboRobot():
 		start_time = time.time()
 		while time.time() - start_time < 0.5 and not rospy.is_shutdown():
 			self.set_state.publish(object_state)
-		print 'Set ' + self.robot_name
 
 
 	def ResetRobot(self):
 		self.SetRobotPose()
 
 
-	def SelfControl(self, action):
+	def SelfControl(self, action, action_range):
+
+		if action[0] < 0.:
+			action[0] = 0.
+		if action[0] > action_range[0]:
+			action[0] = action_range[0]
+		if action[1] < -action_range[1]:
+			action[1] = -action_range[1]
+		if action[1] > action_range[1]:
+			action[1] = action_range[1]
+
 		move_cmd = Twist()
 		move_cmd.linear.x = action[0]
 		move_cmd.linear.y = 0.
@@ -368,7 +382,6 @@ class GazeboRobot():
 
 	def GetRewardAndTerminate(self, t):
 		terminate = False
-		reset = False
 		laser_scan = self.GetLaserObservation()
 		laser_min = np.amin(laser_scan)
 		[v, w] = self.GetSelfSpeedGT()
@@ -376,36 +389,36 @@ class GazeboRobot():
 
 		reward = v * np.cos(w) / self.control_freq
 
-		if laser_min < 0.18:
-			self.stop_counter += 1
-		else:
-			self.stop_counter = 0
+		if laser_min < 0.2:
+		# 	self.stop_counter += 1
+		# else:
+		# 	self.stop_counter = 0
 			
-		if self.stop_counter == 2:
+		# if self.stop_counter == 2:
 			terminate = True
-			print 'crash'
 			reward = -1.
 
-		if t > self.max_steps:
-			print 'time out'
+		if t >= self.max_steps - 1:
 			terminate = True
 
 		return reward, terminate
 
 
-	def GetInitialPose(self, table):
-		mean_table = uniform_filter(np.asarray(table, dtype='float32'), size=5, mode='constant')
-		positions = np.stack(np.where(mean_table == np.amin(mean_table)), axis=1)
-		for i in xrange(0,100):
-			y, x = random.sample(positions, 1)[0]
-			if table[y, x] == 0:
-				break
-		if i == 99:
-			positions = np.stack(np.where(mean_table == 0), axis=1)
-			y, x = random.sample(min_positions, 1)[0]
+	def SetInitialPose(self, table):
+		# mean_table = uniform_filter(np.asarray(table, dtype='float32'), size=5, mode='constant', cval=1.)
+		# positions = np.stack(np.where(mean_table == np.amin(mean_table)), axis=1)
+
+		# for i in xrange(0,100):
+		# 	y, x = random.sample(positions, 1)[0]
+		# 	if table[y, x] == 0:
+		# 		break
+		# if i == 99:
+
+		positions = np.stack(np.where(table == 0), axis=1)
+		y, x = random.sample(positions, 1)[0]
 		y_real = 9.5 - y
 		x_real = x - 9.5
 		theta_real = (np.random.random() - 0.5) * np.pi * 2
 
-		return [x_real, y_real, 0., theta_real]
+		self.SetRobotPose([x_real, y_real, 0, theta_real])
 

@@ -7,7 +7,7 @@ import numpy.random as nr
 
 class OUNoise:
     """ docstring for OUNoise """
-    def __init__(self,action_dimension,mu=0, theta=0.15, sigma=0.3):
+    def __init__(self,action_dimension,mu=0, theta=0.15, sigma=0.2):
         self.action_dimension = action_dimension
         self.mu = mu
         self.theta = theta
@@ -25,9 +25,9 @@ class OUNoise:
         return self.state
 
 if __name__ == '__main__':
-    ou = OUNoise(3)
+    ou = OUNoise(2)
     states = []
-    for i in range(1000):
+    for i in range(100):
         states.append(ou.noise())
     import matplotlib.pyplot as plt
 

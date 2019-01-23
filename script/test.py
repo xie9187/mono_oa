@@ -10,13 +10,12 @@ from GazeboWorld import GazeboEnv, GazeboRobot
 
 def move_test():
 	env = GazeboEnv()
-	env.LaunchGazebo()
 	init_positions = [[-9, 5, 0, 0], [1, 5, 0, 0], [-9, -5, 0, 0], [1, -5, 0, 0]]
 	sim_time_start = env.GetSimTime()
 	real_time_start = time.time()
 	for position_id, init_position in enumerate(init_positions):
 		for robot_id in xrange(1,3):
-			robot = GazeboRobot('robot'+str(robot_id))
+			robot = GazeboRobot('robot'+str(robot_id), 100)
 			robot.SetRobotPose(init_position)
 			rospy.sleep(1.)
 
