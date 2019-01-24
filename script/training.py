@@ -127,7 +127,7 @@ def main():
                             q = agent.Train()
                         summary = sess.run(merged, feed_dict={reward_ph: total_reward,
                                                               q_ph: np.amax(q)})
-                        summary_writer.add_summary(summary, T)
+                        summary_writer.add_summary(summary, episode)
                         print 'Episode:{:} | Steps:{:} | Reward:{:.2f} | T:{:} | Q:{:.2f}'.format(episode, 
                                                                                                   t, 
                                                                                                   total_reward, 
