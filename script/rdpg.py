@@ -278,7 +278,7 @@ class Critic(object):
             })
 
     def ActionGradients(self, depth_input, action_input, lengths):
-        return self.sess.run([self.action_grads, self.q_online], feed_dict={
+        return self.sess.run(self.action_grads, feed_dict={
             self.depth_input: depth_input,
             self.action_input: action_input,
             self.lengths: lengths
