@@ -4,6 +4,7 @@ import os
 import copy
 import time
 import model_utils as model_utils
+import matplotlib.pyplot as plt
 from tensorflow.python.ops.rnn_cell import LSTMStateTuple
 
 class Actor(object):
@@ -56,7 +57,7 @@ class Actor(object):
         self.a_gradient = tf.placeholder(tf.float32, [None, self.a_dim]) # b*l, 2
 
         # Combine the gradients here
-        self.gradients = tf.gradients(self.a_online, self.network_params, -(self.a_gradient+1e-8))
+        self.gradients = tf.gradients(self.a_online, self.network_params, -self.a_gradient)
 
         # Optimization Op by applying gradient, variable pairs
         self.optimize = tf.train.AdamOptimizer(self.learning_rate). \
@@ -395,7 +396,7 @@ class RDPG(object):
                     if t == lengths_batch[i]-1:
                         y_seq[t] = reward_batch[i*self.max_steps+t]
                     elif t < lengths_batch[i]-1:
-                        y_seq[t] = reward_batch[i*self.max_steps+t] + self.gamma * target_q_pred[i*self.max_steps+t, 0]
+                        y_seq[t] = reward_batch[i*self.max_steps+t] + self.gamma * target_q_pred[i*self.max_steps+t+1, 0]
                 y.append(y_seq)
             y = np.expand_dims(np.stack(y), axis=2)
 
@@ -449,10 +450,10 @@ def main():
     # network param
     tf_flags.DEFINE_float('a_learning_rate', 1e-3, 'Actor learning rate.')
     tf_flags.DEFINE_float('c_learning_rate', 1e-3, 'Critic learning rate.')
-    tf_flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
+    tf_flags.DEFINE_integer('batch_size', 4, 'Batch size to use during training.')
     tf_flags.DEFINE_integer('n_hidden', 256, 'Size of each model layer.')
     tf_flags.DEFINE_integer('n_layers', 1, 'Number of rnn layers in the model.')
-    tf_flags.DEFINE_integer('max_steps', 100, 'Max number of steps in an episode.')
+    tf_flags.DEFINE_integer('max_steps', 10, 'Max number of steps in an episode.')
     tf_flags.DEFINE_integer('a_dim', 2, 'Dimension of action.')
     tf_flags.DEFINE_integer('depth_h', 128, 'Depth height.')
     tf_flags.DEFINE_integer('depth_w', 160, 'Depth width.')
@@ -499,23 +500,32 @@ def main():
         sess.run(tf.global_variables_initializer())
         # board_writer = tf.summary.FileWriter('log', sess.graph)
         # board_writer.close()
-        for episode in xrange(1, 50):
+        q_estimation = []
+        for episode in xrange(1, 2000):
             print episode
             seq = []
             for t in xrange(0, agent.max_steps):
-                # seq.append((np.random.rand(128, 160, 1), np.random.rand(2), 0.1))
-                seq.append((np.zeros([128, 160, 1]), np.random.rand(2), 0.1))
+                seq.append((np.ones([128, 160, 1])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps))
             agent.Add2Mem(seq)
 
             if episode > agent.batch_size:
                 agent.Train()
-                summary = sess.run(merged, feed_dict={reward_ph: 0.,
-                                                      q_ph: 0.})
-                summary_writer.add_summary(summary, episode)
+                # summary = sess.run(merged, feed_dict={reward_ph: 0.,
+                #                                       q_ph: 0.})
+                # summary_writer.add_summary(summary, episode)
         
+            if episode > agent.max_steps:
+                q = agent.Train()
+                q_estimation.append(q[:agent.max_steps])
+            else:
+                q_estimation.append(np.zeros([agent.max_steps, 1]))
+        q_estimation = np.hstack(q_estimation)
+        # print q_estimation
+        for t in xrange(agent.max_steps):
+            plt.plot(q_estimation[t], label='step{}'.format(t))
 
-        # q, _ = agent.critic.Train(depth_input, action_input, predicted_q, lengths)
-        
+        plt.legend()
+        plt.show()
 
 if __name__ == '__main__':
     main()
