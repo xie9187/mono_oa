@@ -7,7 +7,7 @@ def Conv2D(inputs,
            kernel_size,
            strides,
            scope=None,
-           activation=tf.nn.relu,
+           activation=tf.nn.leaky_relu,
            trainable=True,
            reuse=False):
     outputs = tf.contrib.layers.conv2d(inputs=inputs,

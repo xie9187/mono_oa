@@ -6,6 +6,7 @@ import rospy
 import time 
 
 from rdpg import RDPG
+from ddpg import DDPG
 from GazeboWorld import GazeboEnv, GazeboRobot
 from ou_noise import OUNoise
 
@@ -29,17 +30,18 @@ tf_flags.DEFINE_float('a_angular_range', np.pi/4, 'Range of the angular speed')
 tf_flags.DEFINE_float('tau', 0.01, 'Target network update rate')
 
 # training param
-tf_flags.DEFINE_integer('total_steps', 1000000, 'Total training steps.')
+tf_flags.DEFINE_integer('total_episode', 100000, 'Total training steps.')
 tf_flags.DEFINE_string('model_dir', os.path.join(CWD, 'saved_network'), 'saved model directory.')
-tf_flags.DEFINE_string('model_name', 'model', 'Name of the model.')
+tf_flags.DEFINE_string('model_name', "rdpg", 'Name of the model.')
 tf_flags.DEFINE_integer('steps_per_checkpoint', 10000, 'How many training steps to do per checkpoint.')
 tf_flags.DEFINE_integer('buffer_size', 1000, 'The size of Buffer')
 tf_flags.DEFINE_float('gamma', 0.99, 'reward discount')
+tf_flags.DEFINE_integer('noise_stop_episode', 40000, 'episode to stop add exploration noise')
 
 # noise param
 tf_flags.DEFINE_float('mu', 0., 'mu')
 tf_flags.DEFINE_float('theta', 0.15, 'theta')
-tf_flags.DEFINE_float('sigma', 0.2, 'sigma')
+tf_flags.DEFINE_float('sigma', 0.3, 'sigma')
 
 flags = tf_flags.FLAGS
 
@@ -64,9 +66,17 @@ def main():
 
     exploration_noise = OUNoise(action_dimension=flags.a_dim, 
                                 mu=flags.mu, theta=flags.theta, sigma=flags.sigma)
-   
-    with tf.Session() as sess:
-        agent = RDPG(flags, sess)
+
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth=True
+
+    with tf.Session(config=config) as sess:
+        if 'rdpg' in flags.model_name:
+            agent = RDPG(flags, sess)
+        elif 'ddpg' in flags.model_name:
+            agent = DDPG(flags, sess)
+        else:
+            print flags.model_name, ' is an invalid model name'
 
         trainable_var = tf.trainable_variables()
 
@@ -95,7 +105,7 @@ def main():
         # start training
         T = 0
         episode = 0
-        while T < flags.total_steps:
+        while episode < flags.total_episode:
             t = 0
             init_pose = robot.SetInitialPose(map_table)
             seq = []
@@ -104,30 +114,32 @@ def main():
             while not rospy.is_shutdown():
                 start_time = time.time()
                 reward, terminate = robot.GetRewardAndTerminate(t)
+
                 if t > 0:
                     seq.append((depth_img, action, reward))
 
                 depth_img = np.reshape(robot.GetDepthImageObservation(), agent.depth_size)
-                action = agent.ActorPredict([depth_img], t)[0] \
-                         + exploration_noise.noise() \
-                         * np.asarray(agent.action_range)
+                action = agent.ActorPredict([depth_img], t)[0]
 
-                robot.SelfControl(action, agent.action_range)
+                if episode < flags.noise_stop_episode:
+                    action += exploration_noise.noise() * np.asarray(agent.action_range) 
+
+                action = robot.SelfControl(action, agent.action_range)
 
                 total_reward += reward
 
                 if (T + 1) % flags.steps_per_checkpoint == 0:
-                    saver.save(sess, os.path.join(model_dir, 'network') , global_step=T)
+                    saver.save(sess, os.path.join(model_dir, 'network') , global_step=episode)
 
                 if terminate:
-                    if len(seq) > 10:
+                    if len(seq) > 3:
                         agent.Add2Mem(seq)
                     if episode > agent.batch_size:
                         for train_step in xrange(2):
                             q = agent.Train()
                         summary = sess.run(merged, feed_dict={reward_ph: total_reward,
                                                               q_ph: np.amax(q)})
-                        summary_writer.add_summary(summary, T)
+                        summary_writer.add_summary(summary, episode)
                         print 'Episode:{:} | Steps:{:} | Reward:{:.2f} | T:{:} | Q:{:.2f}'.format(episode, 
                                                                                                   t, 
                                                                                                   total_reward, 

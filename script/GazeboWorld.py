@@ -378,6 +378,7 @@ class GazeboRobot():
 		move_cmd.angular.y = 0.
 		move_cmd.angular.z = action[1]
 		self.cmd_vel.publish(move_cmd)
+		return action
 
 
 	def GetRewardAndTerminate(self, t):

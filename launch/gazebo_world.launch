@@ -11,5 +11,5 @@
   </include>
 
   <!-- include our robots -->
-  <include file="$(find mono_oa)/launch/multi_robot_state_pub.launch"/>
+  <include file="$(find mono_oa)/launch/single_robot_state_pub.launch"/>
 </launch>
