@@ -37,14 +37,14 @@ class Actor(object):
                                                             depth_size[2]],
                                                             name='depth_input') # b*l, h, w, c
 
-            self.lengths = tf.placeholder(tf.int32, [self.batch_size], name='lengths') # b
+            # self.lengths = tf.placeholder(tf.int32, [self.batch_size], name='lengths') # b
      
             with tf.variable_scope('online'):
-                self.a_online, self.a_test_online, self.rnn_state_online, self.prev_rnn_state_online = self.Model()
+                self.a_online = self.Model()
             self.network_params = tf.trainable_variables()
 
             with tf.variable_scope('target'):
-                self.a_target, self.a_test_target, _, _ = self.Model()
+                self.a_target = self.Model()
             self.target_network_params = tf.trainable_variables()[len(self.network_params):]
 
         # Op for periodically updating target network with online network weights
@@ -71,69 +71,43 @@ class Actor(object):
         conv3 = model_utils.Conv2D(conv2, 32, (3, 3), (2, 2), scope='conv3') # b*l, h, w, c
         shape = conv3.get_shape().as_list()
 
-        rnn_cell = model_utils._lstm_cell(self.n_hidden, self.n_layers)
+        w_h1 = tf.get_variable('w_h1', [shape[1]*shape[2]*shape[3], self.n_hidden], initializer=tf.contrib.layers.xavier_initializer())
+        b_h1 = tf.get_variable('b_h1', [self.n_hidden], initializer=tf.contrib.layers.xavier_initializer())
 
         w_linear_a = tf.get_variable('w_linear', [self.n_hidden, 1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
         w_angular_a = tf.get_variable('w_angular', [self.n_hidden, 1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
-        b_linear_a = tf.get_variable('b_linear_a', [1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
-        b_angular_a = tf.get_variable('b_angular_a', [1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
+        b_a = tf.get_variable('b_a', [2], initializer=tf.initializers.random_uniform(-0.003, 0.003))
 
         # training
-        depth_vectors = tf.reshape(conv3, (self.batch_size, self.max_steps, shape[1]*shape[2]*shape[3])) # b, l, h
+        depth_vectors = tf.reshape(conv3, (-1, shape[1]*shape[2]*shape[3])) # b, l, h
 
-        rnn_outputs, _ = tf.nn.dynamic_rnn(rnn_cell, 
-                                            depth_vectors, 
-                                            sequence_length=self.lengths,
-                                            dtype=tf.float32) # b, l, h
+        h1 = tf.nn.leaky_relu(tf.matmul(depth_vectors, w_h1)) + b_h1
 
-        rnn_outputs_reshape = tf.reshape(rnn_outputs, [-1, self.n_hidden]) # b*l, h
+        a_linear = tf.nn.sigmoid(tf.matmul(h1, w_linear_a)) * self.action_range[0] # b*l, 1
+        a_angular = tf.nn.tanh(tf.matmul(h1, w_angular_a)) * self.action_range[1] # b*l, 1
+        a = tf.concat([a_linear, a_angular], axis=1) + b_a # b*l, 2
 
-        a_linear = tf.nn.sigmoid(tf.matmul(h1, w_linear_a) + b_linear_a) * self.action_range[0] # b*l, 1
-        a_angular = tf.nn.tanh(tf.matmul(h1, w_angular_a) + b_angular_a) * self.action_range[1] # b*l, 1
-        a = tf.concat([a_linear, a_angular], axis=1)# b*l, 2
+        return a
 
-        # testing
-        prev_rnn_state = []
-        for l in xrange(self.n_layers):
-            prev_rnn_state.append(
-                LSTMStateTuple(tf.placeholder(tf.float32, shape=[None, self.n_hidden], name='initial_state1{0}.c'.format(l)),
-                               tf.placeholder(tf.float32, shape=[None, self.n_hidden], name='initial_state1{0}.h'.format(l))))
-        if self.n_layers == 1:
-            prev_rnn_state = prev_rnn_state[0]
-
-        depth_vectors_test = tf.reshape(conv3, (1, 1, shape[1]*shape[2]*shape[3])) # b, l, h
-
-        rnn_outputs_test, rnn_state = rnn_cell(tf.reshape(depth_vectors_test, [-1, shape[1]*shape[2]*shape[3]]), prev_rnn_state)
-
-        a_linear_test = tf.nn.sigmoid(tf.matmul(rnn_outputs_test, w_linear_a) + b_linear_a) * self.action_range[0] # b*l, 1
-        a_angular_test = tf.nn.tanh(tf.matmul(rnn_outputs_test, w_angular_a) + b_angular_a) * self.action_range[1] # b*l, 1
-        a_test = tf.concat([a_linear_test, a_angular_test], axis=1) # b*l, 2
-
-        return a, a_test, rnn_state, prev_rnn_state
-
-    def Train(self, depth_input, lengths, a_gradient):
+    def Train(self, depth_input, a_gradient):
         self.sess.run(self.optimize, feed_dict={
             self.depth_input: depth_input,
-            self.lengths: lengths,
             self.a_gradient: a_gradient
             })
 
-    def PredictSeqTarget(self, depth_input, lengths):
+    def PredictSeqTarget(self, depth_input):
         return self.sess.run(self.a_target, feed_dict={
             self.depth_input: depth_input,
-            self.lengths: lengths
             })
 
-    def PredictSeqOnline(self, depth_input, lengths):
+    def PredictSeqOnline(self, depth_input):
         return self.sess.run(self.a_online, feed_dict={
             self.depth_input: depth_input,
-            self.lengths: lengths
             })
 
-    def Predict(self, depth_input, prev_rnn_state_online):
-        return self.sess.run([self.a_test_online, self.rnn_state_online], feed_dict={
+    def Predict(self, depth_input):
+        return self.sess.run(self.a_online, feed_dict={
             self.depth_input: depth_input,
-            self.prev_rnn_state_online: prev_rnn_state_online
             })
 
     def UpdateTarget(self):
@@ -178,11 +152,11 @@ class Critic(object):
             self.lengths = tf.placeholder(tf.int32, [self.batch_size], name='lengths') # b
 
             with tf.variable_scope('online'):
-                self.q_online, self.q_test_online, self.rnn_state_online, self.prev_rnn_state_online = self.Model()
+                self.q_online = self.Model()
             self.network_params = tf.trainable_variables()[num_actor_vars:]
 
             with tf.variable_scope('target'):
-                self.q_target, self.q_test_target, _, _, = self.Model()
+                self.q_target = self.Model()
             self.target_network_params = tf.trainable_variables()[(len(self.network_params) + num_actor_vars):]
 
         self.predicted_q = tf.placeholder(tf.float32, [self.batch_size, self.max_steps, 1], name='predicted_q')
@@ -213,44 +187,21 @@ class Critic(object):
         conv3 = model_utils.Conv2D(conv2, 32, (3, 3), (2, 2), scope='conv3') # b*l, h, w, c
         shape = conv3.get_shape().as_list()
 
-        rnn_cell = model_utils._lstm_cell(self.n_hidden, self.n_layers)
+        w_h1 = tf.get_variable('w_h1', [shape[1]*shape[2]*shape[3]+2, self.n_hidden], initializer=tf.contrib.layers.xavier_initializer())
+        b_h1 = tf.get_variable('b_h1', [self.n_hidden], initializer=tf.contrib.layers.xavier_initializer())
 
         w_q = tf.get_variable('w_q', [self.n_hidden, 1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
         b_q = tf.get_variable('b_q', [1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
 
         # training
-        depth_vectors = tf.reshape(conv3, (self.batch_size, self.max_steps, shape[1]*shape[2]*shape[3]), name='train_d_reshape') # b, l, h*w*c
-        action_input_reshape = tf.reshape(self.action_input, (self.batch_size, self.max_steps, 2), name='train_a_reshape') # b, l, 2
-        inputs = tf.concat([depth_vectors, action_input_reshape], axis=2) # b, l, h*w*c+2
+        depth_vectors = tf.reshape(conv3, (-1, shape[1]*shape[2]*shape[3]), name='train_d_reshape') # b, l, h*w*c
+        inputs = tf.concat([depth_vectors, self.action_input], axis=1) # b*l, h*w*c+2
 
-        rnn_outputs, _ = tf.nn.dynamic_rnn(rnn_cell, 
-                                            inputs, 
-                                            sequence_length=self.lengths,
-                                            dtype=tf.float32) # b, l, h
+        h1 = tf.nn.leaky_relu(tf.matmul(inputs, w_h1)) + b_h1
 
-        rnn_outputs_reshape = tf.reshape(rnn_outputs, [-1, self.n_hidden]) # b*l, h
+        q = tf.matmul(h1, w_q) + b_q # b*l, 1
 
-        q = tf.matmul(rnn_outputs_reshape, w_q) + b_q # b*l, 1
-        # q = tf.reshape(q, (self.batch_size, self.max_steps, 1))
-
-        # testing
-        depth_vectors_test = tf.reshape(conv3, (1, 1, shape[1]*shape[2]*shape[3]), name='test_d_reshape') # b, l, h*w*c
-        action_input_reshape_test = tf.reshape(self.action_input, (1, 1, 2), name='test_a_reshape') # b, l, 2
-        inputs_test = tf.concat([depth_vectors_test, action_input_reshape_test], axis=2) # b, l, h*w*c+2
-
-        prev_rnn_state = []
-        for l in xrange(self.n_layers):
-            prev_rnn_state.append(
-                LSTMStateTuple(tf.placeholder(tf.float32, shape=[None, self.n_hidden], name='initial_state1{0}.c'.format(l)),
-                               tf.placeholder(tf.float32, shape=[None, self.n_hidden], name='initial_state1{0}.h'.format(l))))
-        if self.n_layers == 1:
-            prev_rnn_state = prev_rnn_state[0]
-
-        rnn_outputs_test, rnn_state = rnn_cell(tf.reshape(inputs_test, (-1, shape[1]*shape[2]*shape[3]+2)), prev_rnn_state)
-
-        q_test = tf.matmul(rnn_outputs_test, w_q) + b_q # b*l, 1
-
-        return q, q_test, rnn_state, prev_rnn_state
+        return q
 
     def Train(self, depth_input, action_input, predicted_q, lengths):
         return self.sess.run([self.q_online, self.optimize], feed_dict={
@@ -260,25 +211,22 @@ class Critic(object):
             self.lengths: lengths
             })
 
-    def PredictSeqOnline(self, depth_input, action_input, lengths):
+    def PredictSeqOnline(self, depth_input, action_input):
         return self.sess.run(self.q_online, feed_dict={
             self.depth_input: depth_input,
-            self.action_input: action_input,
-            self.lengths: lengths
+            self.action_input: action_input
             })
 
-    def PredictSeqTarget(self, depth_input, action_input, lengths):
+    def PredictSeqTarget(self, depth_input, action_input):
         return self.sess.run(self.q_target, feed_dict={
             self.depth_input: depth_input,
             self.action_input: action_input,
-            self.lengths: lengths
             })
 
-    def Predict(self, depth_input, action_input, prev_rnn_state_online):
-        return self.sess.run([self.q_test_online, self.rnn_state_online], feed_dict={
+    def Predict(self, depth_input, action_input):
+        return self.sess.run(self.q_online, feed_dict={
             self.depth_input: depth_input,
-            self.action_input: action_input,
-            self.prev_rnn_state_online: prev_rnn_state_online,
+            self.action_input: action_input
             })
 
     def ActionGradients(self, depth_input, action_input, lengths):
@@ -293,8 +241,8 @@ class Critic(object):
 
 
 
-class RDPG(object):
-    """docstring for RDPG"""
+class DDPG(object):
+    """docstring for DDPG"""
     def __init__(self, flags, sess):
         self.depth_size = [flags.depth_h, flags.depth_w, flags.depth_c]
         self.n_hidden = flags.n_hidden
@@ -331,11 +279,7 @@ class RDPG(object):
         self.memory = []
 
     def ActorPredict(self, depth_input, t):
-        if t == 0:
-            prev_rnn_state_online=(np.zeros([1, self.n_hidden]), np.zeros([1, self.n_hidden]))
-        else:
-            prev_rnn_state_online = copy.deepcopy(self.rnn_state)
-        a, self.rnn_state = self.actor.Predict(depth_input, prev_rnn_state_online)
+        a = self.actor.Predict(depth_input)
         return a
 
     def Add2Mem(self, seq):
@@ -390,8 +334,8 @@ class RDPG(object):
             depth_t_batch, action_batch, reward_batch, lengths_batch = batch
 
             #compute target y
-            target_a_pred = self.actor.PredictSeqTarget(depth_t_batch, lengths_batch) # b*l, 2
-            target_q_pred = self.critic.PredictSeqTarget(depth_t_batch, target_a_pred, lengths_batch) # b*l, 1
+            target_a_pred = self.actor.PredictSeqTarget(depth_t_batch) # b*l, 2
+            target_q_pred = self.critic.PredictSeqTarget(depth_t_batch, target_a_pred) # b*l, 1
             y = []
             for i in xrange(self.batch_size):
                 y_seq = np.zeros([self.max_steps])
@@ -409,13 +353,13 @@ class RDPG(object):
             q, _ = self.critic.Train(depth_t_batch, action_batch, y, lengths_batch)
 
             # actions for a_gradients from critic
-            actions = self.actor.PredictSeqOnline(depth_t_batch, lengths_batch)
+            actions = self.actor.PredictSeqOnline(depth_t_batch)
 
             # a_gradients
             a_gradients = self.critic.ActionGradients(depth_t_batch, actions, lengths_batch)                                                      
-
+            
             # actor update
-            self.actor.Train(depth_t_batch, lengths_batch, a_gradients[0])
+            self.actor.Train(depth_t_batch, a_gradients[0])
 
             train_time = time.time() - start_time - sample_time - y_time
 
@@ -485,7 +429,7 @@ def main():
         os.makedirs(model_dir)
 
     with tf.Session() as sess:
-        agent = RDPG(flags, sess)
+        agent = DDPG(flags, sess)
 
         trainable_var = tf.trainable_variables()
         print "  [*] printing trainable variables"
@@ -507,7 +451,7 @@ def main():
         for episode in xrange(1, 2000):
             print episode
             seq = []
-            for t in xrange(0, agent.max_steps):
+            for t in xrange(0, agent.max_steps-2):
                 seq.append((np.ones([128, 160, 1])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps))
             agent.Add2Mem(seq)
 
@@ -517,7 +461,7 @@ def main():
                 #                                       q_ph: 0.})
                 # summary_writer.add_summary(summary, episode)
         
-            if episode > agent.max_steps:
+            if episode > agent.batch_size:
                 q = agent.Train()
                 q_estimation.append(q[:agent.max_steps])
             else:

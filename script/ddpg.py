@@ -76,16 +76,18 @@ class Actor(object):
 
         w_linear_a = tf.get_variable('w_linear', [self.n_hidden, 1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
         w_angular_a = tf.get_variable('w_angular', [self.n_hidden, 1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
-        b_a = tf.get_variable('b_a', [2], initializer=tf.initializers.random_uniform(-0.003, 0.003))
+        
+        b_linear_a = tf.get_variable('b_linear_a', [1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
+        b_angular_a = tf.get_variable('b_angular_a', [1], initializer=tf.initializers.random_uniform(-0.003, 0.003))
 
         # training
         depth_vectors = tf.reshape(conv3, (-1, shape[1]*shape[2]*shape[3])) # b, l, h
 
         h1 = tf.nn.leaky_relu(tf.matmul(depth_vectors, w_h1)) + b_h1
 
-        a_linear = tf.nn.sigmoid(tf.matmul(h1, w_linear_a)) * self.action_range[0] # b*l, 1
-        a_angular = tf.nn.tanh(tf.matmul(h1, w_angular_a)) * self.action_range[1] # b*l, 1
-        a = tf.concat([a_linear, a_angular], axis=1) + b_a # b*l, 2
+        a_linear = tf.nn.sigmoid(tf.matmul(h1, w_linear_a) + b_linear_a) * self.action_range[0] # b*l, 1
+        a_angular = tf.nn.tanh(tf.matmul(h1, w_angular_a) + b_angular_a) * self.action_range[1] # b*l, 1
+        a = tf.concat([a_linear, a_angular], axis=1)# b*l, 2
 
         return a
 
@@ -145,11 +147,9 @@ class Critic(object):
                                                             depth_size[0], 
                                                             depth_size[1], 
                                                             depth_size[2]],
-                                                            name='depth_input') # b*l, h, w, c
+                                                            name='depth_input') # b, h, w, c
             self.action_input = tf.placeholder(tf.float32, [None, 2],
-                                                            name='action_input') # b*l, 2
-
-            self.lengths = tf.placeholder(tf.int32, [self.batch_size], name='lengths') # b
+                                                            name='action_input') # b, 2
 
             with tf.variable_scope('online'):
                 self.q_online = self.Model()
@@ -159,20 +159,16 @@ class Critic(object):
                 self.q_target = self.Model()
             self.target_network_params = tf.trainable_variables()[(len(self.network_params) + num_actor_vars):]
 
-        self.predicted_q = tf.placeholder(tf.float32, [self.batch_size, self.max_steps, 1], name='predicted_q')
-        self.mask = tf.expand_dims(tf.sequence_mask(self.lengths, maxlen=self.max_steps, dtype=tf.float32), axis=2) # b, l, 1
-        self.square_diff = tf.pow((self.predicted_q - tf.reshape(self.q_online, (self.batch_size, self.max_steps, 1)))*self.mask, 2) # b, l, 1
+        self.predicted_q = tf.placeholder(tf.float32, [self.batch_size, 1], name='predicted_q')
+        self.square_diff = tf.pow(self.predicted_q - self.q_online, 2) # b, l, 1
 
-        self.loss_t = tf.reduce_sum(self.square_diff, reduction_indices=1) / tf.cast(self.lengths, tf.float32)# b, 1
-        self.loss_n = tf.reduce_sum(self.loss_t, reduction_indices=0) / self.batch_size # 1
+        self.loss = tf.reduce_mean(self.square_diff)
 
-        self.gradient = tf.gradients(self.loss_n, self.network_params)
+        self.gradient = tf.gradients(self.loss, self.network_params)
         self.opt = tf.train.AdamOptimizer(self.learning_rate)
         self.optimize = self.opt.apply_gradients(zip(self.gradient, self.network_params))
 
-        mask_reshape = tf.reshape(self.mask, (self.batch_size*self.max_steps, 1)) # b*l, 1
-        self.a_gradient_mask = tf.tile(mask_reshape, [1, 2]) # b*l, 2
-        self.action_grads = tf.gradients(self.q_online, self.action_input) * self.a_gradient_mask
+        self.action_grads = tf.gradients(self.q_online, self.action_input)
 
         # Op for periodically updating target network with online network weights
         self.update_target_network_params = \
@@ -203,12 +199,11 @@ class Critic(object):
 
         return q
 
-    def Train(self, depth_input, action_input, predicted_q, lengths):
+    def Train(self, depth_input, action_input, predicted_q):
         return self.sess.run([self.q_online, self.optimize], feed_dict={
             self.depth_input: depth_input,
             self.action_input: action_input,
-            self.predicted_q: predicted_q,
-            self.lengths: lengths
+            self.predicted_q: predicted_q
             })
 
     def PredictSeqOnline(self, depth_input, action_input):
@@ -229,11 +224,10 @@ class Critic(object):
             self.action_input: action_input
             })
 
-    def ActionGradients(self, depth_input, action_input, lengths):
+    def ActionGradients(self, depth_input, action_input, ):
         return self.sess.run(self.action_grads, feed_dict={
             self.depth_input: depth_input,
-            self.action_input: action_input,
-            self.lengths: lengths
+            self.action_input: action_input
             })
 
     def UpdateTarget(self):
@@ -282,44 +276,47 @@ class DDPG(object):
         a = self.actor.Predict(depth_input)
         return a
 
-    def Add2Mem(self, seq):
-        self.memory.append(seq) #seq: ((d_0, a_0, r_0), (d_1, a_1, r_1), ..., (d_T, a_T, r_T))
+    def Add2Mem(self, sample):
+        self.memory.append(sample) # (d_0, a_0, r_0, t_0 )
         if len(self.memory) > self.buffer_size:
             self.memory.pop(0)
 
     def SampleBatch(self):
         if len(self.memory) >= self.batch_size:
-            indices = np.random.randint(0, len(self.memory), size=(self.batch_size))
+            indices = np.random.randint(2, len(self.memory)-1, size=self.batch_size)
             depth_t_batch = []
             action_batch = []
             reward_batch = []
-            lengths_batch = []
+            terminate_batch = []
+            depth_t1_batch = []
             for idx in indices:
-                sampled_seq = copy.deepcopy(self.memory[idx])
-                seq_len = len(sampled_seq)
+                last_last_depth = self.memory[idx-2][0]
+                last_depth = self.memory[idx-1][0]
+                depth = self.memory[idx][0]
+                next_depth = self.memory[idx+1][0]
 
-                full_depth_t_seq = np.zeros([self.max_steps, self.depth_size[0], self.depth_size[1], self.depth_size[2]])
-                full_action_seq = np.zeros([self.max_steps, self.a_dim])
-                full_reward_seq = np.zeros([self.max_steps])
-                for t in xrange(seq_len):
-                    full_depth_t_seq[t, :, :, :] = sampled_seq[t][0]
-                    full_action_seq[t, :] = sampled_seq[t][1]
-                    full_reward_seq[t] = sampled_seq[t][2]
+                sample = self.memory[idx]
 
-                depth_t_batch.append(full_depth_t_seq)
-                action_batch.append(full_action_seq)
-                reward_batch.append(full_reward_seq)
-                lengths_batch.append(seq_len)
+                d_t = np.stack([depth, last_depth, last_last_depth], axis=-1)
+                d_t1 = np.stack([next_depth, depth, last_depth], axis=-1)
 
-            shape = self.depth_size
-            depth_t_batch = np.reshape(np.stack(depth_t_batch), (self.batch_size * self.max_steps, shape[0], shape[1], shape[2]))
-            action_batch = np.reshape(np.stack(action_batch), (self.batch_size * self.max_steps, self.a_dim))
-            reward_batch = np.reshape(np.stack(reward_batch), (self.batch_size * self.max_steps))
+                depth_t_batch.append(d_t)
+                action_batch.append(sample[1])
+                reward_batch.append(sample[2])
+                terminate_batch.append(sample[3])
+                depth_t1_batch.append(d_t1)
 
-            return [depth_t_batch, action_batch, reward_batch, lengths_batch]
+            depth_t_batch = np.stack(depth_t_batch)
+            action_batch = np.stack(action_batch)
+            reward_batch = np.stack(reward_batch)
+            terminate_batch = np.stack(terminate_batch)
+            depth_t1_batch = np.stack(depth_t1_batch)
+
+            return [depth_t_batch, action_batch, reward_batch, terminate_batch, depth_t1_batch]
         else:
             print 'sample sequences are not enough'
             return None
+
 
     def Train(self):
         start_time = time.time()
@@ -331,33 +328,31 @@ class DDPG(object):
         if batch is None:
             return
         else:
-            depth_t_batch, action_batch, reward_batch, lengths_batch = batch
+            depth_t_batch, action_batch, reward_batch, terminate_batch, depth_t1_batch = batch
 
             #compute target y
-            target_a_pred = self.actor.PredictSeqTarget(depth_t_batch) # b*l, 2
-            target_q_pred = self.critic.PredictSeqTarget(depth_t_batch, target_a_pred) # b*l, 1
+            target_a_t1_pred = self.actor.PredictSeqTarget(depth_t1_batch) # b, 2
+            target_q_pred = self.critic.PredictSeqTarget(depth_t1_batch, target_a_t1_pred) # b, 1
             y = []
             for i in xrange(self.batch_size):
-                y_seq = np.zeros([self.max_steps])
-                for t in xrange(self.max_steps):
-                    if t == lengths_batch[i]-1:
-                        y_seq[t] = reward_batch[i*self.max_steps+t]
-                    elif t < lengths_batch[i]-1:
-                        y_seq[t] = reward_batch[i*self.max_steps+t] + self.gamma * target_q_pred[i*self.max_steps+t+1, 0]
-                y.append(y_seq)
-            y = np.expand_dims(np.stack(y), axis=2)
+                if terminate_batch[i]:
+                    y.append(reward_batch[i])
+                else:
+                    y.append(reward_batch[i] + self.gamma * target_q_pred[i, 0])
+
+            y = np.expand_dims(np.stack(y), axis=1)
 
             y_time = time.time() - start_time - sample_time
 
             # critic update
-            q, _ = self.critic.Train(depth_t_batch, action_batch, y, lengths_batch)
+            q, _ = self.critic.Train(depth_t_batch, action_batch, y)
 
             # actions for a_gradients from critic
             actions = self.actor.PredictSeqOnline(depth_t_batch)
 
             # a_gradients
-            a_gradients = self.critic.ActionGradients(depth_t_batch, actions, lengths_batch)                                                      
-            
+            a_gradients = self.critic.ActionGradients(depth_t_batch, actions)                                                      
+
             # actor update
             self.actor.Train(depth_t_batch, a_gradients[0])
 
@@ -397,14 +392,14 @@ def main():
     # network param
     tf_flags.DEFINE_float('a_learning_rate', 1e-3, 'Actor learning rate.')
     tf_flags.DEFINE_float('c_learning_rate', 1e-3, 'Critic learning rate.')
-    tf_flags.DEFINE_integer('batch_size', 4, 'Batch size to use during training.')
+    tf_flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
     tf_flags.DEFINE_integer('n_hidden', 256, 'Size of each model layer.')
     tf_flags.DEFINE_integer('n_layers', 1, 'Number of rnn layers in the model.')
     tf_flags.DEFINE_integer('max_steps', 10, 'Max number of steps in an episode.')
     tf_flags.DEFINE_integer('a_dim', 2, 'Dimension of action.')
     tf_flags.DEFINE_integer('depth_h', 128, 'Depth height.')
     tf_flags.DEFINE_integer('depth_w', 160, 'Depth width.')
-    tf_flags.DEFINE_integer('depth_c', 1, 'Depth channel.')
+    tf_flags.DEFINE_integer('depth_c', 3, 'Depth channel.')
     tf_flags.DEFINE_float('a_linear_range', 0.4, 'Range of the linear speed')
     tf_flags.DEFINE_float('a_angular_range', np.pi/4, 'Range of the angular speed')
     tf_flags.DEFINE_float('tau', 0.01, 'Target network update rate')
@@ -448,28 +443,30 @@ def main():
         # board_writer = tf.summary.FileWriter('log', sess.graph)
         # board_writer.close()
         q_estimation = []
-        for episode in xrange(1, 2000):
+        T = 0
+        for episode in xrange(1, 200):
             print episode
-            seq = []
-            for t in xrange(0, agent.max_steps-2):
-                seq.append((np.ones([128, 160, 1])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps))
-            agent.Add2Mem(seq)
+            q_list = []
+            for t in xrange(0, agent.max_steps):
+                if t == agent.max_steps - 1:
+                    term = True
+                else:
+                    term = False
+                sample = (np.ones([128, 160, 1])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps, term)
+                agent.Add2Mem(sample)
 
-            if episode > agent.batch_size:
-                agent.Train()
-                # summary = sess.run(merged, feed_dict={reward_ph: 0.,
-                #                                       q_ph: 0.})
-                # summary_writer.add_summary(summary, episode)
-        
-            if episode > agent.batch_size:
-                q = agent.Train()
-                q_estimation.append(q[:agent.max_steps])
-            else:
-                q_estimation.append(np.zeros([agent.max_steps, 1]))
-        q_estimation = np.hstack(q_estimation)
-        # print q_estimation
-        for t in xrange(agent.max_steps):
-            plt.plot(q_estimation[t], label='step{}'.format(t))
+                if T > agent.batch_size:
+                    q = agent.Train()
+                    # summary = sess.run(merged, feed_dict={reward_ph: 0.,
+                    #                                       q_ph: 0.})
+                    # summary_writer.add_summary(summary, episode)
+                    q_list.append(np.amax(q))
+                T += 1
+            if T > agent.batch_size:
+                q_estimation.append(np.amax(q_list))
+
+
+        plt.plot(q_estimation, label='q_max')
 
         plt.legend()
         plt.show()
