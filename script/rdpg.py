@@ -308,26 +308,26 @@ class RDPG(object):
         self.buffer_size = flags.buffer_size
         self.a_dim = flags.a_dim
         self.gamma = flags.gamma
-
-        self.actor = Actor(sess=sess,
-                           depth_size=self.depth_size,
-                           n_hidden=self.n_hidden,
-                           max_steps=self.max_steps,
-                           learning_rate=self.a_learning_rate,
-                           batch_size=self.batch_size,
-                           action_range=self.action_range,
-                           tau=self.tau,
-                           n_layers=self.n_layers)
-
-        self.critic = Critic(sess=sess,
-                             depth_size=self.depth_size,
-                             n_hidden=self.n_hidden,
-                             max_steps=self.max_steps,
-                             learning_rate=self.c_learning_rate,
-                             batch_size=self.batch_size,
-                             num_actor_vars=len(self.actor.network_params)+len(self.actor.target_network_params),
-                             tau=self.tau,
-                             n_layers=self.n_layers)
+        with tf.device('/gpu:1'):
+            self.actor = Actor(sess=sess,
+                               depth_size=self.depth_size,
+                               n_hidden=self.n_hidden,
+                               max_steps=self.max_steps,
+                               learning_rate=self.a_learning_rate,
+                               batch_size=self.batch_size,
+                               action_range=self.action_range,
+                               tau=self.tau,
+                               n_layers=self.n_layers)
+        with tf.device('/gpu:0'):
+            self.critic = Critic(sess=sess,
+                                 depth_size=self.depth_size,
+                                 n_hidden=self.n_hidden,
+                                 max_steps=self.max_steps,
+                                 learning_rate=self.c_learning_rate,
+                                 batch_size=self.batch_size,
+                                 num_actor_vars=len(self.actor.network_params)+len(self.actor.target_network_params),
+                                 tau=self.tau,
+                                 n_layers=self.n_layers)
         self.memory = []
 
     def ActorPredict(self, depth_input, t):
@@ -465,7 +465,7 @@ def main():
     # network param
     tf_flags.DEFINE_float('a_learning_rate', 1e-3, 'Actor learning rate.')
     tf_flags.DEFINE_float('c_learning_rate', 1e-3, 'Critic learning rate.')
-    tf_flags.DEFINE_integer('batch_size', 2, 'Batch size to use during training.')
+    tf_flags.DEFINE_integer('batch_size', 1, 'Batch size to use during training.')
     tf_flags.DEFINE_integer('n_hidden', 256, 'Size of each model layer.')
     tf_flags.DEFINE_integer('n_layers', 1, 'Number of rnn layers in the model.')
     tf_flags.DEFINE_integer('max_steps', 100, 'Max number of steps in an episode.')
