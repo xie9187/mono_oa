@@ -108,6 +108,9 @@ def train_rdpg():
             seq = []
             total_reward = 0
             loop_time = []
+
+            depth_img = robot.GetDepthImageObservation()
+            depth_stack = np.stack([depth_img, depth_img, depth_img], axis=-1)
             while not rospy.is_shutdown():
                 start_time = time.time()
                 reward, terminate = robot.GetRewardAndTerminate(t)
@@ -115,8 +118,10 @@ def train_rdpg():
                 if t > 0:
                     seq.append((depth_img, action, reward))
 
-                depth_img = np.reshape(robot.GetDepthImageObservation(), agent.depth_size)
-                action = agent.ActorPredict([depth_img], t)[0]
+                depth_img = robot.GetDepthImageObservation()
+                depth_stack = np.stack([depth_img, depth_stack[:, :, 0], depth_stack[:, :, 1]], axis=-1)
+                
+                action = agent.ActorPredict([depth_stack], t)[0]
 
                 if episode < flags.noise_stop_episode:
                     action += exploration_noise.noise() * np.asarray(agent.action_range) 

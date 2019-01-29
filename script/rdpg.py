@@ -88,8 +88,8 @@ class Actor(object):
 
         rnn_outputs_reshape = tf.reshape(rnn_outputs, [-1, self.n_hidden]) # b*l, h
 
-        a_linear = tf.nn.sigmoid(tf.matmul(h1, w_linear_a) + b_linear_a) * self.action_range[0] # b*l, 1
-        a_angular = tf.nn.tanh(tf.matmul(h1, w_angular_a) + b_angular_a) * self.action_range[1] # b*l, 1
+        a_linear = tf.nn.sigmoid(tf.matmul(rnn_outputs_reshape, w_linear_a) + b_linear_a) * self.action_range[0] # b*l, 1
+        a_angular = tf.nn.tanh(tf.matmul(rnn_outputs_reshape, w_angular_a) + b_angular_a) * self.action_range[1] # b*l, 1
         a = tf.concat([a_linear, a_angular], axis=1)# b*l, 2
 
         # testing
@@ -358,9 +358,21 @@ class RDPG(object):
                 full_action_seq = np.zeros([self.max_steps, self.a_dim])
                 full_reward_seq = np.zeros([self.max_steps])
                 for t in xrange(seq_len):
-                    full_depth_t_seq[t, :, :, :] = sampled_seq[t][0]
+                    full_depth_t_seq[t, :, :, 0] = sampled_seq[t][0]
+                    if t == 0:
+                        full_depth_t_seq[t, :, :, 1] = sampled_seq[t][0]  
+                        full_depth_t_seq[t, :, :, 2] = sampled_seq[t][0]
+                    elif t == 1:
+                        full_depth_t_seq[t, :, :, 1] = sampled_seq[t-1][0]
+                        full_depth_t_seq[t, :, :, 2] = sampled_seq[t-1][0]
+                    else:
+                        full_depth_t_seq[t, :, :, 1] = sampled_seq[t-1][0]
+                        full_depth_t_seq[t, :, :, 2] = sampled_seq[t-2][0]                   
+
                     full_action_seq[t, :] = sampled_seq[t][1]
                     full_reward_seq[t] = sampled_seq[t][2]
+
+
 
                 depth_t_batch.append(full_depth_t_seq)
                 action_batch.append(full_action_seq)
@@ -425,10 +437,10 @@ class RDPG(object):
 
             target_time = time.time() - start_time - sample_time - y_time - train_time
 
-            # print 'sample_time:{:.3f}, y_time:{:.3f}, train_time:{:.3f}, target_time:{:.3f}'.format(sample_time,
-            #                                                                                         y_time,
-            #                                                                                         train_time,
-            #                                                                                         target_time)
+            print 'sample_time:{:.3f}, y_time:{:.3f}, train_time:{:.3f}, target_time:{:.3f}'.format(sample_time,
+                                                                                                    y_time,
+                                                                                                    train_time,
+                                                                                                    target_time)
             
             return q
 
@@ -453,14 +465,14 @@ def main():
     # network param
     tf_flags.DEFINE_float('a_learning_rate', 1e-3, 'Actor learning rate.')
     tf_flags.DEFINE_float('c_learning_rate', 1e-3, 'Critic learning rate.')
-    tf_flags.DEFINE_integer('batch_size', 4, 'Batch size to use during training.')
+    tf_flags.DEFINE_integer('batch_size', 2, 'Batch size to use during training.')
     tf_flags.DEFINE_integer('n_hidden', 256, 'Size of each model layer.')
     tf_flags.DEFINE_integer('n_layers', 1, 'Number of rnn layers in the model.')
-    tf_flags.DEFINE_integer('max_steps', 10, 'Max number of steps in an episode.')
+    tf_flags.DEFINE_integer('max_steps', 100, 'Max number of steps in an episode.')
     tf_flags.DEFINE_integer('a_dim', 2, 'Dimension of action.')
     tf_flags.DEFINE_integer('depth_h', 128, 'Depth height.')
     tf_flags.DEFINE_integer('depth_w', 160, 'Depth width.')
-    tf_flags.DEFINE_integer('depth_c', 1, 'Depth channel.')
+    tf_flags.DEFINE_integer('depth_c', 3, 'Depth channel.')
     tf_flags.DEFINE_float('a_linear_range', 0.4, 'Range of the linear speed')
     tf_flags.DEFINE_float('a_angular_range', np.pi/4, 'Range of the angular speed')
     tf_flags.DEFINE_float('tau', 0.01, 'Target network update rate')
@@ -484,7 +496,9 @@ def main():
     if not os.path.exists(model_dir): 
         os.makedirs(model_dir)
 
-    with tf.Session() as sess:
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth=True
+    with tf.Session(config=config) as sess:
         agent = RDPG(flags, sess)
 
         trainable_var = tf.trainable_variables()
@@ -500,15 +514,16 @@ def main():
         merged = tf.summary.merge_all()
         summary_writer = tf.summary.FileWriter(model_dir, sess.graph)
 
+
         sess.run(tf.global_variables_initializer())
         # board_writer = tf.summary.FileWriter('log', sess.graph)
         # board_writer.close()
         q_estimation = []
-        for episode in xrange(1, 2000):
+        for episode in xrange(1, 100):
             print episode
             seq = []
             for t in xrange(0, agent.max_steps):
-                seq.append((np.ones([128, 160, 1])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps))
+                seq.append((np.ones([128, 160])*t/np.float(agent.max_steps), [0., 0.], 1./agent.max_steps))
             agent.Add2Mem(seq)
 
             if episode > agent.batch_size:
