@@ -498,7 +498,7 @@ def main():
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth=True
-    config.gpu_options.log_device_placement=True
+    config.log_device_placement=True
     with tf.Session(config=config) as sess:
         agent = RDPG(flags, sess)
 
