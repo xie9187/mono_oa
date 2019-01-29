@@ -308,26 +308,26 @@ class RDPG(object):
         self.buffer_size = flags.buffer_size
         self.a_dim = flags.a_dim
         self.gamma = flags.gamma
-        with tf.device('/gpu:1'):
-            self.actor = Actor(sess=sess,
-                               depth_size=self.depth_size,
-                               n_hidden=self.n_hidden,
-                               max_steps=self.max_steps,
-                               learning_rate=self.a_learning_rate,
-                               batch_size=self.batch_size,
-                               action_range=self.action_range,
-                               tau=self.tau,
-                               n_layers=self.n_layers)
-        with tf.device('/gpu:0'):
-            self.critic = Critic(sess=sess,
-                                 depth_size=self.depth_size,
-                                 n_hidden=self.n_hidden,
-                                 max_steps=self.max_steps,
-                                 learning_rate=self.c_learning_rate,
-                                 batch_size=self.batch_size,
-                                 num_actor_vars=len(self.actor.network_params)+len(self.actor.target_network_params),
-                                 tau=self.tau,
-                                 n_layers=self.n_layers)
+
+        self.actor = Actor(sess=sess,
+                           depth_size=self.depth_size,
+                           n_hidden=self.n_hidden,
+                           max_steps=self.max_steps,
+                           learning_rate=self.a_learning_rate,
+                           batch_size=self.batch_size,
+                           action_range=self.action_range,
+                           tau=self.tau,
+                           n_layers=self.n_layers)
+
+        self.critic = Critic(sess=sess,
+                             depth_size=self.depth_size,
+                             n_hidden=self.n_hidden,
+                             max_steps=self.max_steps,
+                             learning_rate=self.c_learning_rate,
+                             batch_size=self.batch_size,
+                             num_actor_vars=len(self.actor.network_params)+len(self.actor.target_network_params),
+                             tau=self.tau,
+                             n_layers=self.n_layers)
         self.memory = []
 
     def ActorPredict(self, depth_input, t):
@@ -437,10 +437,10 @@ class RDPG(object):
 
             target_time = time.time() - start_time - sample_time - y_time - train_time
 
-            print 'sample_time:{:.3f}, y_time:{:.3f}, train_time:{:.3f}, target_time:{:.3f}'.format(sample_time,
-                                                                                                    y_time,
-                                                                                                    train_time,
-                                                                                                    target_time)
+            # print 'sample_time:{:.3f}, y_time:{:.3f}, train_time:{:.3f}, target_time:{:.3f}'.format(sample_time,
+            #                                                                                         y_time,
+            #                                                                                         train_time,
+            #                                                                                         target_time)
             
             return q
 
@@ -464,7 +464,7 @@ def main():
 
     # network param
     tf_flags.DEFINE_float('a_learning_rate', 1e-3, 'Actor learning rate.')
-    tf_flags.DEFINE_float('c_learning_rate', 1e-3, 'Critic learning rate.')
+    tf_flags.DEFINE_float('c_learning_rate', 1e-4, 'Critic learning rate.')
     tf_flags.DEFINE_integer('batch_size', 1, 'Batch size to use during training.')
     tf_flags.DEFINE_integer('n_hidden', 256, 'Size of each model layer.')
     tf_flags.DEFINE_integer('n_layers', 1, 'Number of rnn layers in the model.')
@@ -498,7 +498,6 @@ def main():
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth=True
-    config.log_device_placement=True
     with tf.Session(config=config) as sess:
         agent = RDPG(flags, sess)
 

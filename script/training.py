@@ -30,13 +30,13 @@ tf_flags.DEFINE_float('a_angular_range', np.pi/4, 'Range of the angular speed')
 tf_flags.DEFINE_float('tau', 0.01, 'Target network update rate')
 
 # training param
-tf_flags.DEFINE_integer('total_steps', 100000, 'Total training steps.')
+tf_flags.DEFINE_integer('total_steps', 1000000, 'Total training steps.')
 tf_flags.DEFINE_string('model_dir', os.path.join(CWD, 'saved_network'), 'saved model directory.')
 tf_flags.DEFINE_string('model_name', "rdpg", 'Name of the model.')
 tf_flags.DEFINE_integer('steps_per_checkpoint', 10000, 'How many training steps to do per checkpoint.')
-tf_flags.DEFINE_integer('buffer_size', 100000, 'The size of Buffer')
+tf_flags.DEFINE_integer('buffer_size', 10000, 'The size of Buffer')
 tf_flags.DEFINE_float('gamma', 0.99, 'reward discount')
-tf_flags.DEFINE_integer('noise_stop_episode', 100000, 'episode to stop add exploration noise')
+tf_flags.DEFINE_integer('noise_stop_episode', 800000, 'episode to stop add exploration noise')
 
 # noise param
 tf_flags.DEFINE_float('mu', 0., 'mu')
@@ -120,7 +120,7 @@ def train_rdpg():
 
                 depth_img = robot.GetDepthImageObservation()
                 depth_stack = np.stack([depth_img, depth_stack[:, :, 0], depth_stack[:, :, 1]], axis=-1)
-                
+
                 action = agent.ActorPredict([depth_stack], t)[0]
 
                 if episode < flags.noise_stop_episode:
@@ -223,7 +223,7 @@ def train_ddpg():
 
                 action = agent.ActorPredict([depth_stack], t)[0]
 
-                if episode < flags.noise_stop_episode:
+                if T < flags.noise_stop_episode:
                     action += exploration_noise.noise() * np.asarray(agent.action_range) 
 
                 action = robot.SelfControl(action, agent.action_range)
